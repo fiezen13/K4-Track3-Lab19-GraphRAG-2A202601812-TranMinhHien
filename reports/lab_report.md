@@ -1,122 +1,98 @@
-# Báo Cáo Thực Hành & Thuyết Minh Kỹ Thuật — Lab 19: GraphRAG vs Flat RAG
+# Báo cáo Lab 19 — GraphRAG vs Flat RAG
 
-**Học viên:** [Họ và Tên]  
-**Khóa học:** AICB-K34 · Track 3: GraphRAG  
-**Ngày thực hiện:** [Ngày/Tháng/Năm]  
+**Học viên:** Trần Minh Hiền · **MSSV:** 2A202601812
+**Khóa:** Cohort 4 · Track 3 · **Ngày:** 20/08/2026
 
----
+## Phần 1 — Thuyết minh kỹ thuật và phân tích lỗi
 
-## 📌 PHẦN 1: THUYẾT MINH KỸ THUẬT & PHÂN TÍCH CA LỖI
+### 1. Coreference Resolution
 
-### 1. Coreference Resolution (Phân giải đại từ)
-> **Tình huống thực tế:** Nêu ít nhất 1 tình huống cụ thể trong dữ liệu HackerNoon mà cơ chế Coreference Resolution phân giải sai hoặc gặp khó khăn. Hậu quả của nó đối với Knowledge Graph là gì?
+Pipeline chỉ gửi 137/400 chunk có dấu hiệu đại từ cho LLM; 263 chunk đi thẳng để giảm chi phí và tránh sửa quá mức. Không có batch thất bại. Trường hợp khó là chunk `405cc9b946478641117d::c0000`: “everyone including Apple Disney and ESPN decides they want...” bị đổi thành “the companies want...”. Cách sửa không gán nhầm một công ty cụ thể nhưng làm mất sắc thái “mọi bên”, có thể sinh chủ thể mơ hồ. Vì vậy hệ thống dùng prompt conservative, giữ `unresolved_mentions`, allowlist và evidence; khi không chắc nên giữ nguyên đại từ.
 
-*Trả lời:*
-- **Ví dụ từ dữ liệu:** [Trích dẫn chunk_id hoặc câu văn cụ thể]
-- **Hiện tượng:** [Ví dụ: 'The company' bị nhầm sang công ty được nhắc đến ở câu trước thay vì chủ ngữ chính]
-- **Hậu quả đối với Graph:** [Ví dụ: Tạo ra False Edge gán nhầm sự kiện M&A cho đối thủ cạnh tranh]
+### 2. Entity Resolution Threshold và Lexical Guard
 
----
+Ngưỡng cosine là `0.90`, chỉ xét top-5 láng giềng FAISS. Cặp `Google Store` và `Google Play Store` có similarity `0.882936` nhưng bị từ chối: token `Play` là qualifier có ý nghĩa và hai tên chỉ hai dịch vụ khác nhau. Audit có 24 cặp: 22 `REJECT_THRESHOLD`, 1 `REJECT_GUARD`, 1 `MERGE_VECTOR`. Ưu tiên precision là hợp lý vì false merge sẽ lan lỗi sang mọi đường graph.
 
-### 2. Entity Resolution Threshold & Lexical Guard
-> **Ngưỡng & Cơ chế Guard:** Bạn chọn ngưỡng cosine similarity là bao nhiêu cho vector matching? Trích dẫn 1 cặp thực thể có độ tương đồng vector cao ($> 0.85$) nhưng bị Lexical Guard chặn không cho gộp (Reject) và giải thích lý do.
+### 3. Đồ thị và Super-node Mitigation
 
-*Trả lời:*
-- **Ngưỡng cosine similarity:** `threshold = ...` (ví dụ: 0.90)
-- **Cặp thực thể bị Guard chặn:** `[Thực thể A]` vs `[Thực thể B]` (Ví dụ: `Sam Altman` vs `Steve Altman` hoặc `Apple` vs `Apple Music`)
-- **Lý do chặn:** [Lý do ngữ nghĩa tại sao không được gộp 2 thực thể này]
+Graph cuối có 195 node, 117 edge, không có edge mất provenance.
 
----
+| Hạng | Entity | Type | Degree |
+|---:|---|---|---:|
+| 1 | Google | Company | 4 |
+| 2 | Blue Solutions | Company | 3 |
+| 3 | PSG | Company | 3 |
 
-### 3. Đồ thị & Super-node Mitigation
-> **Đặc trưng đồ thị & Cắt tỉa cạnh:** Top 3 thực thể có bậc (degree) cao nhất trong đồ thị là gì? Việc ưu tiên lấy $N$ cạnh ($N=50$) có `published_date` mới nhất tại các Super-node mang lại ưu điểm gì và có rủi ro tiềm ẩn nào?
+Graph mẫu chưa có node vượt ngưỡng 100. Guard vẫn giới hạn mỗi super-node 50 cạnh mới nhất, toàn truy vấn 250 cạnh và graph context 14.000 ký tự. Nó ngăn context explosion và ưu tiên tin mới; rủi ro là mất sự kiện lịch sử. Cải tiến là lọc thời gian theo câu hỏi và rerank bằng relevance kết hợp recency.
 
-*Trả lời:*
-- **Top 3 Super-nodes:**
+### 4. Provenance và kiểm soát schema
 
-| Hạng | Tên thực thể | Loại thực thể (Type) | Bậc kết nối (Degree) |
-|------|--------------|---------------------|----------------------|
-| 1 | | | |
-| 2 | | | |
-| 3 | | | |
+Mỗi edge giữ `source_chunk_id`, `published_date`, `evidence`, giúp dẫn nguồn, xử lý mâu thuẫn theo thời gian và rebuild đúng cạnh; sanity check cho `invalid provenance = 0`. Node được giới hạn ở `Company`, `Person`, `Technology`; relation gồm `ACQUIRED`, `DEVELOPED`, `INVESTED_IN`, `FOUNDED`, `WORKED_AT`, `PARTNERED_WITH`, `USES`, `LEADS`. Allowlist tăng precision nhưng thiếu các quan hệ Golden như `COMMITTED_TO`, `CONSIDERING`, `PROVIDES_ACCESS_TO`, `HOSTS_MODEL_FROM`, làm giảm recall. Nên mở rộng ontology có version thay vì cho relation free-form.
 
-- **Ưu điểm & Rủi ro của Temporal Mitigation:**
-  - *Ưu điểm:* [Giảm thiểu bùng nổ context, giữ lại thông tin cập nhật nhất...]
-  - *Rủi ro:* [Nếu câu hỏi liên quan đến sự kiện lịch sử trong quá khứ xa có thể bị cắt mất...]
+### 5. Benchmark 25 câu Golden chính thức
 
----
+| Metric trung bình | Flat RAG | GraphRAG | Graph − Flat |
+|---|---:|---:|---:|
+| Comprehensiveness | 2.720 | 2.600 | -0.120 |
+| Faithfulness | 4.640 | 4.520 | -0.120 |
+| Multi-hop reasoning | 2.800 | 2.640 | -0.160 |
+| Latency (s) | 3.837 | 2.967 | -0.870 |
+| Token usage | 830.960 | 768.720 | -62.240 |
 
-### 4. So sánh Thực nghiệm (Flat RAG vs GraphRAG)
+Kết quả không chứng minh GraphRAG luôn tốt hơn. Graph chỉ extraction 400 chunk và ontology hẹp nên Flat có coverage tốt hơn một chút. Graph dùng ít token và nhanh hơn trong sample chủ yếu vì graph context thường ngắn; chi phí indexing chưa nằm trong query latency.
 
-#### Bảng tổng hợp Benchmark (LLM-as-a-Judge):
+### 6. Failure case — Flat RAG yếu hơn
 
-| Tiêu chí đánh giá | Flat RAG | GraphRAG | Độ chênh lệch ($\Delta$) | Nhận xét phân tích |
-|-------------------|----------|----------|--------------------------|-------------------|
-| **Comprehensiveness (1–5)** | | | | |
-| **Faithfulness (1–5)** | | | | |
-| **Multi-hop Reasoning (1–5)** | | | | |
-| **Latency trung bình (s)** | | | | |
-| **Token usage trung bình** | | | | |
+`G5000-29`, câu hỏi về sự mở rộng các công ty tham gia White House AI commitments từ tháng 7 đến tháng 9: Flat đạt trung bình `3.667`, Graph `4.667` (delta `+1.0`). Flat top-k dễ ưu tiên một bài; hybrid context bổ sung entity/relationship giúp nối hai mốc và hai participant set. Phần cải thiện vẫn dựa cả vector context vì schema chưa có `COMMITTED_TO`.
 
-#### Phân tích 2 Ca lỗi Điển hình:
-1. **Ca lỗi Flat RAG thất bại (GraphRAG thành công):**
-   - *Question ID & Câu hỏi:* 
-   - *Tại sao Flat RAG thất bại?* [Ví dụ: Vector search không kết nối được 2 chunks chứa thông tin rời rạc...]
-   - *GraphRAG đã giải quyết như thế nào?* [Ví dụ: Graph traversal qua cạnh A -> B -> C...]
-2. **Ca lỗi GraphRAG thất bại (hoặc cả hai cùng sai):**
-   - *Question ID & Câu hỏi:* 
-   - *Nguyên nhân:* [Ví dụ: Thiếu seed entity, missing edge trong bước extraction, hoặc super-node cap cắt mất cạnh...]
-   - *Đề xuất khắc phục:* [...]
+### 7. Failure case — GraphRAG yếu hơn
 
----
+`G5000-33`, phân biệt AP–OpenAI collaboration và voluntary governance commitment: Flat `5.0`, Graph `3.0` (delta `-2.0`). Root cause là extraction chỉ phủ 400 chunk và allowlist thiếu governance relation. `G5000-50` cũng giảm từ `2.333` xuống `1.0` vì cần tổng hợp NVIDIA, AMD, Intel nhưng graph thiếu `CONSIDERING` và positioning. Khắc phục: extraction toàn corpus, mở rộng ontology có kiểm soát, temporal/entity filters và fallback flat-only khi `NO_SEED` hoặc coverage thấp.
 
-### 5. Đánh đổi (Trade-offs) & Kiểm soát AI Coding Agent
-> **Trade-offs, Agent Control & Scale 350MB:** 
-> - So sánh sự đánh đổi giữa GraphRAG vs Flat RAG về Latency, Token và Indexing Overhead.
-> - Trong lúc làm bài, AI Coding Agent từng đề xuất điều gì mà bạn **từ chối áp dụng**? Tại sao?
-> - Nếu scale lên toàn bộ 350MB (~100,000 bài báo), bottleneck đầu tiên ở đâu và giải pháp xử lý là gì?
+### 8. Trade-off
 
-*Trả lời:*
-- **Đánh đổi Quality vs Cost vs Latency:** [...]
-- **Quyết định từ chối AI Coding Agent:** [Ví dụ: Từ chối thuật toán $O(N^2)$ pairwise cosine trên toàn bộ dataset vì gây tràn RAM/OOM...]
-- **Giải pháp scale 350MB:** [Ví dụ: Async batch extraction với worker queue, HNSW index với blocking cho Entity Resolution, Community Partitioning...]
+Flat RAG index rẻ, cập nhật dễ và mạnh ở factoid nhưng top-k không đảm bảo nối đủ tài liệu. GraphRAG tốn coreference, NER/RE, entity resolution và ingestion trước truy vấn; bù lại có traversal, provenance và audit. Hybrid phù hợp nhất: graph cung cấp quan hệ, vector cung cấp coverage. Tôi không dùng Golden tự tạo và không tiếp tục benchmark trên subset 4.000/1.500 ngẫu nhiên sau khi xác nhận upstream có Golden cho đúng 5.000 dòng, vì kết quả lệch scope sẽ không kiểm chứng được.
 
----
+### 9. Scale 350 MB
 
-## 📌 PHẦN 2: SUY NGẪM & KẾ HOẠCH ĐỒ ÁN (Reflection & Action Plan)
+Bottleneck đầu tiên là token/API call cho coreference và extraction, sau đó entity resolution và ingestion. Production cần streaming partition, async queue có rate limiter, checkpoint theo content hash, dead-letter queue, cache theo model/prompt version và incremental `UNWIND`. Entity resolution cần blocking theo type/lexical key rồi ANN/HNSW, tránh O(N²). Graph lớn cần community partition, degree-aware traversal, temporal filter và monitoring chi phí/chất lượng.
 
-### 1. Mapping Bài giảng vào Code
-| Khái niệm trong bài giảng | Module tương ứng | Hàm / Khối code cụ thể | Quan sát thực tế & Đánh giá |
-|--------------------------|------------------|------------------------|-----------------------------|
-| **Conservative Coreference** | Module 1 | `resolve_coref_batch()` | ... |
-| **Schema & Allowlist Guard** | Module 2 | `ALLOWED_NODE_TYPES`, `ALLOWED_RELATIONS` | ... |
-| **Bulk Cypher Ingestion** | Module 2 | `bulk_insert_nodes()`, `bulk_insert_edges()` | ... |
-| **Entity Resolution & Union-Find** | Module 3 | `build_resolution_map()`, `UF` | ... |
-| **Super-node Degree Cap** | Module 4 | `retrieve_graph_context()` | ... |
-| **LLM-as-a-Judge Evaluation** | Module 5 | `judge_answer()` | ... |
+### 10. Khi nào chọn Flat, Graph hoặc Hybrid?
 
----
+Chọn Flat cho câu hỏi mà đáp án nằm trong một đoạn và cần ingest nhanh. Chọn Graph khi quan hệ nhiều bước, tính thời gian và audit quan trọng. Chọn Hybrid khi corpus vừa có nội dung dài vừa có quan hệ; đây là lựa chọn của lab. Router nên dựa trên seed confidence, graph coverage và loại câu hỏi, không buộc mọi truy vấn đi qua graph.
 
-### 2. Quá trình Debugging & Bài học
-- **Lỗi kỹ thuật phức tạp nhất gặp phải:** [...]
-- **Cách bạn đã xử lý thành công:** [...]
+## Phần 2 — Reflection và Action Plan
 
----
+### Mapping bài giảng vào code
 
-### 3. Kế hoạch Áp dụng vào Đồ án Thực tế (Action Plan)
-- **Tên đồ án / Dự án:** [Tên dự án]
-- **Đặc thù bài toán & Lý do chọn giải pháp:** [Tại sao bài toán của bạn cần GraphRAG hay chỉ cần Flat/Hybrid RAG?]
-- **Cấu trúc Node & Relation dự kiến:**
-  - Nodes: `...`
-  - Relations: `...`
-- **Chiến lược xử lý Super-node & Entity Resolution:** [...]
+| Khái niệm | Hàm/khối code | Quan sát |
+|---|---|---|
+| Conservative coreference | `resolve_coref_batch()`, `run_coref()` | 137/400 chunk cần LLM; có checkpoint và unresolved log. |
+| Schema guard | `ALLOWED_NODE_TYPES`, `ALLOWED_RELATIONS` | Precision tốt, ontology hẹp làm giảm recall. |
+| Bulk Cypher | `bulk_insert_nodes()`, `bulk_insert_edges()` | `UNWIND` idempotent; 195 node/117 edge. |
+| Entity resolution | `build_resolution_map()`, `UF`, `merge_guard()` | ANN top-k và lexical guard tránh false merge. |
+| Super-node cap | `retrieve_graph_context()` | Degree, edge và context cap bảo vệ latency. |
+| LLM Judge | `judge_answer()`, `run_evaluation()` | Đủ 25/25 câu, checkpoint và rationale. |
 
----
+### Debugging và bài học
 
-## 🎯 TỰ ĐÁNH GIÁ
-| Tiêu chí | Điểm tự chấm (1–5) | Ghi chú |
-|----------|-------------------|---------|
-| Mức độ hiểu bài giảng GraphRAG | | |
-| Khả năng kiểm soát AI Coding Agent | | |
-| Chất lượng đồ thị tri thức xây dựng | | |
-| Khả năng phân tích và debug hệ thống | | |
+Lỗi khó nhất là đồng bộ corpus với Golden và xử lý quota/model API. Golden upstream dùng 5.000 dòng đầu, trong khi lần chạy đầu dùng 4.000 rồi sample 1.500 bài. Tôi tải lại đúng 5.000 dòng, bỏ sample, bắt buộc đọc Golden upstream và rebuild FAISS. Evaluation được checkpoint/resume; parser đổi sang `JSONDecoder.raw_decode` để nhận JSON kèm reasoning text. Bài học: benchmark chỉ có ý nghĩa khi cố định corpus scope, ontology, model version và checkpoint.
+
+### Action Plan
+
+**Dự án:** trợ lý tra cứu tin công nghệ và theo dõi quan hệ doanh nghiệp. Dùng Hybrid GraphRAG: Flat cho nội dung, graph cho M&A, đầu tư, nhân sự và chuỗi nhiều bước.
+
+- Nodes: `Company`, `Person`, `Technology`, thêm `Event`, `PolicyCommitment`.
+- Relations: tập hiện tại cộng `CONSIDERING`, `COMMITTED_TO`, `PROVIDES_ACCESS_TO`, `HOSTS_MODEL_FROM`.
+- Resolution: alias + lexical blocking + ANN theo type + human review vùng 0.85–0.92.
+- Retrieval: temporal/relation filter, relevance rerank, context budget, fallback vector khi graph coverage thấp.
+- Monitoring: extraction precision, provenance validity, no-seed rate, quality theo group, latency/token và indexing cost.
+
+### Tự đánh giá
+
+| Tiêu chí | Điểm (1–5) | Ghi chú |
+|---|---:|---|
+| Hiểu GraphRAG | 4 | Hiểu pipeline, provenance và giới hạn coverage. |
+| Kiểm soát AI Coding Agent | 4 | Kiểm chứng upstream, bỏ Golden tự tạo, không che failure. |
+| Chất lượng graph | 3 | Precision tốt, coverage còn hạn chế. |
+| Phân tích/debug | 4 | Hoàn tất checkpoint, quota fallback và RCA. |

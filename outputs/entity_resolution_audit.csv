@@ -1,0 +1,25 @@
+type,left,right,similarity,decision
+Company,Information Services Group,Universal Information Services,0.6805684566497803,REJECT_THRESHOLD
+Company,Amazon Web Services,Amazon Web Services Inc.,0.823627769947052,REJECT_THRESHOLD
+Company,Integral,Integreon,0.6449242234230042,REJECT_THRESHOLD
+Company,ServiceNow,ServiceNow Inc.,0.8114626407623291,REJECT_THRESHOLD
+Company,Biz Technology Solutions,Biz Technology Solutions Inc.,0.8655288219451904,REJECT_THRESHOLD
+Company,CoolSys,Ansys,0.6829365491867065,REJECT_THRESHOLD
+Company,Syntech,Synopsys Inc.,0.6743205785751343,REJECT_THRESHOLD
+Company,Syntech,TD SYNNEX,0.6202590465545654,REJECT_THRESHOLD
+Company,Hon Hai Technology Group (Foxconn),Future Technology Group,0.6362907886505127,REJECT_THRESHOLD
+Company,ServiceNow Inc.,Amazon Web Services Inc.,0.6705674529075623,REJECT_THRESHOLD
+Company,Los Angeles Times,New York Times,0.6517223119735718,REJECT_THRESHOLD
+Technology,Personal Cloud platform,Google Cloud,0.7231490015983582,REJECT_THRESHOLD
+Technology,Personal Cloud platform,cloud IAM solution,0.6590150594711304,REJECT_THRESHOLD
+Technology,Personal Cloud platform,cloud technology,0.6174911856651306,REJECT_THRESHOLD
+Technology,Artificial Intelligence (AI)/machine learning (ML) technology,Artificial intelligence (AI) technology,0.8179779648780823,REJECT_THRESHOLD
+Technology,Apple Pay,Google Pay,0.6386455297470093,REJECT_THRESHOLD
+Technology,GPT-3.5,GPT-3,0.9074609279632568,MERGE_VECTOR
+Technology,Integrated Cloud solutions,cloud IAM solution,0.7457399368286133,REJECT_THRESHOLD
+Technology,Integrated Cloud solutions,cloud technology,0.6647613048553467,REJECT_THRESHOLD
+Technology,cloud IAM solution,cloud technology,0.6811637878417969,REJECT_THRESHOLD
+Technology,cloud IAM solution,Google Cloud,0.6596323847770691,REJECT_THRESHOLD
+Technology,Google Store,Google Play Store,0.8829357624053955,REJECT_GUARD
+Technology,Google Store,Google Cloud,0.6483464241027832,REJECT_THRESHOLD
+Technology,Google Cloud,cloud technology,0.6666488647460938,REJECT_THRESHOLD
